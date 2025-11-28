@@ -1,4 +1,4 @@
-name: CI – tests + Playwright + Docker push
+name: CI â€“ tests + Playwright + Docker push
 
 on:
   push:
@@ -7,29 +7,14 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test-and-push:
+  build-test-and-push:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: calculator
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
     env:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5433/calculator
+      BASE_URL: http://localhost:8000
 
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -37,35 +22,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Ensure Playwright and pytest-playwright are installed even if requirements.txt misses them
-          pip install playwright pytest-playwright
-
-      - name: Install Playwright browsers
-        run: |
+          pip install -r requirements.txt
           python -m playwright install --with-deps
 
-      - name: Run pytest (unit + integration + E2E)
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
+      - name: Start FastAPI app
         run: |
-          pytest
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Run tests (unit + integration + Playwright E2E)
+        run: pytest -vv
 
-      - name: Login to Docker Hub
+      - name: Log in to Docker Hub
+        if: success()
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
+        if: success()
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-user-calculations:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-user-calculations-m13:latest

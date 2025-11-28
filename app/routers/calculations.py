@@ -1,61 +1,66 @@
+from datetime import datetime
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
 from app import models, schemas
+from app.database import get_db
 
-router = APIRouter(prefix="/calculations", tags=["calculations"])
+router = APIRouter()
 
 
-def perform_operation(operation: str, a: float, b: float) -> float:
-    op = operation.lower()
-    if op == "add":
-        return a + b
-    elif op == "subtract":
-        return a - b
-    elif op == "multiply":
-        return a * b
-    elif op == "divide":
-        if b == 0:
+def _compute_result(operand1: float, operand2: float, operation: str) -> float:
+    if operation == "add":
+        return operand1 + operand2
+    if operation == "subtract":
+        return operand1 - operand2
+    if operation == "multiply":
+        return operand1 * operand2
+    if operation == "divide":
+        if operand2 == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot divide by zero",
             )
-        return a / b
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported operation",
-        )
+        return operand1 / operand2
+
+    # This is what test_invalid_operation_returns_error expects (400)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid operation",
+    )
 
 
-# BROWSE
-@router.get("/", response_model=list[schemas.CalculationRead])
-def browse_calculations(db: Session = Depends(get_db)):
-    return db.query(models.Calculation).all()
-
-
-# READ
-@router.get("/{calc_id}", response_model=schemas.CalculationRead)
-def read_calculation(calc_id: int, db: Session = Depends(get_db)):
-    calc = db.query(models.Calculation).get(calc_id)
-    if not calc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calculation not found")
-    return calc
-
-
-# ADD
-@router.post("/", response_model=schemas.CalculationRead, status_code=status.HTTP_201_CREATED)
-def add_calculation(
+@router.post(
+    "/",
+    response_model=schemas.CalculationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_calculation(
     calc_in: schemas.CalculationCreate,
     db: Session = Depends(get_db),
 ):
-    result = perform_operation(calc_in.operation, calc_in.operand1, calc_in.operand2)
+    """
+    POST /calculations
+
+    Used by test_calculation_bread_flow:
+    - Creates a calculation
+    - Stores result in DB
+    - Returns 201 + CalculationRead
+    """
+    result = _compute_result(
+        calc_in.operand1,
+        calc_in.operand2,
+        calc_in.operation,
+    )
+
     calc = models.Calculation(
-        operation=calc_in.operation,
         operand1=calc_in.operand1,
         operand2=calc_in.operand2,
+        operation=calc_in.operation,
         result=result,
+        created_at=datetime.utcnow(),
     )
     db.add(calc)
     db.commit()
@@ -63,38 +68,77 @@ def add_calculation(
     return calc
 
 
-# EDIT
-@router.put("/{calc_id}", response_model=schemas.CalculationRead)
-def edit_calculation(
-    calc_id: int,
-    calc_update: schemas.CalculationUpdate,
-    db: Session = Depends(get_db),
-):
+@router.get(
+    "/",
+    response_model=List[schemas.CalculationRead],
+)
+def list_calculations(db: Session = Depends(get_db)):
+    """
+    GET /calculations
+    Returns all calculations.
+    """
+    return db.query(models.Calculation).all()
+
+
+@router.get(
+    "/{calc_id}",
+    response_model=schemas.CalculationRead,
+)
+def get_calculation(calc_id: int, db: Session = Depends(get_db)):
+    """
+    GET /calculations/{id}
+    """
     calc = db.query(models.Calculation).get(calc_id)
     if not calc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calculation not found")
+        raise HTTPException(status_code=404, detail="Calculation not found")
+    return calc
 
-    if calc_update.operation is not None:
-        calc.operation = calc_update.operation
-    if calc_update.operand1 is not None:
-        calc.operand1 = calc_update.operand1
-    if calc_update.operand2 is not None:
-        calc.operand2 = calc_update.operand2
 
-    calc.result = perform_operation(calc.operation, calc.operand1, calc.operand2)
+@router.put(
+    "/{calc_id}",
+    response_model=schemas.CalculationRead,
+)
+def update_calculation(
+    calc_id: int,
+    calc_in: schemas.CalculationUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    PUT /calculations/{id}
+    Updates operands/operation and recomputes result.
+    """
+    calc = db.query(models.Calculation).get(calc_id)
+    if not calc:
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+    if calc_in.operand1 is not None:
+        calc.operand1 = calc_in.operand1
+    if calc_in.operand2 is not None:
+        calc.operand2 = calc_in.operand2
+    if calc_in.operation is not None:
+        calc.operation = calc_in.operation
+
+    calc.result = _compute_result(
+        calc.operand1,
+        calc.operand2,
+        calc.operation,
+    )
 
     db.commit()
     db.refresh(calc)
     return calc
 
 
-# DELETE
-@router.delete("/{calc_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{calc_id}")
 def delete_calculation(calc_id: int, db: Session = Depends(get_db)):
+    """
+    DELETE /calculations/{id}
+    Returns 200 + simple detail message.
+    """
     calc = db.query(models.Calculation).get(calc_id)
     if not calc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calculation not found")
+        raise HTTPException(status_code=404, detail="Calculation not found")
 
     db.delete(calc)
     db.commit()
-    return None
+    return {"detail": "Calculation deleted"}
