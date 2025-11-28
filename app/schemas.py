@@ -1,19 +1,12 @@
-# FILE: app/schemas.py
 from datetime import datetime
-from typing import Optional, List
-
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 
-# ------------- User Schemas ------------- #
+# ===== JWT / Auth Schemas =====
 
-class UserBase(BaseModel):
-    email: EmailStr
-    full_name: Optional[str] = None
-
-
-class UserCreate(UserBase):
-    password: str = Field(min_length=6)
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class UserLogin(BaseModel):
@@ -21,20 +14,33 @@ class UserLogin(BaseModel):
     password: str
 
 
-class UserRead(UserBase):
-    id: int
-    created_at: datetime
+# ===== User Schemas =====
+
+class UserBase(BaseModel):
+    email: EmailStr
+    full_name: str | None = None
 
     class Config:
         orm_mode = True
 
 
-# ------------- Calculation Schemas ------------- #
+class UserCreate(UserBase):
+    password: str
+
+
+class UserRead(UserBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ===== Calculation Schemas =====
 
 class CalculationBase(BaseModel):
-    operation: str
     operand1: float
     operand2: float
+    operation: str
 
 
 class CalculationCreate(CalculationBase):
@@ -42,15 +48,14 @@ class CalculationCreate(CalculationBase):
 
 
 class CalculationUpdate(BaseModel):
-    operation: Optional[str] = None
-    operand1: Optional[float] = None
-    operand2: Optional[float] = None
+    operand1: float | None = None
+    operand2: float | None = None
+    operation: str | None = None
 
 
 class CalculationRead(CalculationBase):
     id: int
     result: float
-    owner_id: Optional[int] = None
     created_at: datetime
 
     class Config:
